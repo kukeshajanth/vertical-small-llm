@@ -54,7 +54,7 @@ fig.tight_layout(); fig.savefig("img/data_distribution.png", dpi=150); plt.close
 print("data_distribution.png")
 
 # 3) accuracy
-rows = [("Base SmolLM3-3B", 39.3, GRAY), ("GPT-5.5", 77.2, BLUE),
+rows = [("Base SmolLM3-3B", 39.3, GRAY), ("GPT-5.5", 76.7, BLUE),
         ("Claude Sonnet 4.6", 77.0, BLUE), ("Fine-tuned SmolLM3-3B (ours)", 81.7, ORANGE)]
 rows = sorted(rows, key=lambda r: r[1])
 fig, ax = plt.subplots(figsize=(8, 3.8))
