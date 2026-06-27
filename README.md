@@ -75,7 +75,8 @@ Run the whole thing again with `--dataset banking77` to show the recipe travels.
 | `data.py` | Loads either vertical, builds the prompt. Frontier models get the full label list; the fine-tuned model learns the labels from data. |
 | `train_lora.py` | Fine-tunes the 3B with (Q)LoRA. Prints `train_seconds`. |
 | `eval_local.py` | Scores a local model (base or fine-tuned): accuracy, tokens/sec, sec/request. Dumps predictions to `runs/`. |
-| `eval_frontier.py` | Scores a frontier model (Claude / GPT) on the same split, prompted fairly. |
+| `eval_frontier.py` | Scores a frontier model (Claude / GPT) on the same split via the API, prompted fairly. |
+| `cli_frontier.py` | Same, but through the authenticated `claude` / `codex` CLIs (no API keys). The path the article's numbers actually used. |
 | `match.py` | Maps a free-text answer back to the nearest real label, the same way for every model. |
 | `report.py` | Lines up every run into one table and a bar chart. |
 | `gen_charts.py` | Regenerates the figures in `assets/` from a completed run (optional). |
@@ -99,6 +100,24 @@ Other honest notes:
 - TRL moves fast. If `SFTConfig` rejects `max_length` / `processing_class`, your version wants `max_seq_length` / `tokenizer`. One-line rename.
 
 ---
+
+## Frontier baselines: API key or subscription CLI
+
+You can score the frontier models two ways. Both hit the same test split and write the same `runs/` files, so `report.py` lines them up either way.
+
+- **API key** (`eval_frontier.py`): bring an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. Calls are one-shot with thinking disabled, the cleanest measurement.
+- **Subscription CLI** (`cli_frontier.py`): no keys. It drives the `claude` and `codex` CLIs you already log into, which is exactly how the numbers in the writeup were produced (the box had no API keys).
+
+```bash
+# API path
+python eval_frontier.py --dataset ledgar --provider anthropic --model claude-sonnet-4-6 --limit 300
+
+# CLI path (Claude / ChatGPT subscription, no keys)
+python cli_frontier.py  --dataset ledgar --engine sonnet-4.6 --limit 300 --workers 4
+python cli_frontier.py  --dataset ledgar --engine gpt-5.5    --limit 300 --workers 4
+```
+
+One honest caveat from doing it the CLI way: `claude -p` runs the model as an *agent*, and on a single-shot label a reasoning model can talk itself into a sibling category. That is a property of the harness, not the model. We saw it on Opus and left Opus out. For the cleanest single-shot number, prefer the API path or a mid-tier model.
 
 ## Make it yours
 
