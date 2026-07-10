@@ -1,12 +1,22 @@
-"""Generate the article's image assets from the real run (runs in the container)."""
-import os, re
+"""Regenerate article assets from local experiment artifacts."""
+import json
+import re
 from collections import Counter
+from pathlib import Path
+
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-NAVY, ORANGE, GRAY, BLUE = "#0C1752", "#D56E48", "#9b9892", "#3266ad"
-os.makedirs("img", exist_ok=True)
+
+NAVY = "#0C1752"
+ORANGE = "#D56E48"
+GRAY = "#9B9892"
+BLUE = "#3266AD"
+OUT = Path("assets")
+RUNS = Path("runs")
+OUT.mkdir(exist_ok=True)
 plt.rcParams.update({"font.size": 11})
 
 
@@ -15,71 +25,138 @@ def no_spines(ax):
     ax.spines["right"].set_visible(False)
 
 
-# 1) training loss curve (parse hero.log)
-losses, epochs = [], []
-for line in open("hero.log", errors="ignore"):
-    if "'loss'" in line and "'epoch'" in line:
-        ml = re.search(r"'loss':\s*'?([\d.]+)", line)
-        me = re.search(r"'epoch':\s*'?([\d.]+)", line)
-        if ml and me:
-            losses.append(float(ml.group(1)))
-            epochs.append(float(me.group(1)))
-if losses:
+def write_training_loss():
+    log = Path("hero.log")
+    if not log.exists():
+        print("skip training_loss.png: hero.log not found")
+        return
+
+    losses, epochs = [], []
+    for line in log.read_text(errors="ignore").splitlines():
+        if "'loss'" not in line or "'epoch'" not in line:
+            continue
+        loss_match = re.search(r"'loss':\s*'?([\d.]+)", line)
+        epoch_match = re.search(r"'epoch':\s*'?([\d.]+)", line)
+        if loss_match and epoch_match:
+            losses.append(float(loss_match.group(1)))
+            epochs.append(float(epoch_match.group(1)))
+
+    if not losses:
+        print("skip training_loss.png: no loss records in hero.log")
+        return
+
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.plot(epochs, losses, color=ORANGE, lw=2.2, marker="o", ms=4)
     ax.set_xlabel("epoch")
     ax.set_ylabel("training loss")
-    ax.set_title("Fine-tuning SmolLM3-3B on LEDGAR (LoRA, DGX Spark, ~74 min)", color=NAVY, fontsize=12)
-    ax.grid(True, alpha=.25)
+    ax.set_title("Fine-tuning SmolLM3-3B on LEDGAR", color=NAVY, fontsize=12)
+    ax.grid(True, alpha=0.25)
     no_spines(ax)
-    fig.tight_layout(); fig.savefig("img/training_loss.png", dpi=150); plt.close()
-    print("training_loss.png", len(losses), "points")
+    fig.tight_layout()
+    fig.savefig(OUT / "training_loss.png", dpi=150)
+    plt.close(fig)
+    print("wrote assets/training_loss.png")
 
-# 2) data distribution (long tail)
-from datasets import load_dataset
-d = load_dataset("coastalcph/lex_glue", "ledgar")
-names = d["train"].features["label"].names
-cnt = Counter(d["train"]["label"])
-counts = sorted([cnt[i] for i in range(len(names))], reverse=True)
-fig, ax = plt.subplots(figsize=(7, 4))
-ax.bar(range(len(counts)), counts, color=ORANGE, width=1.0)
-ax.set_xlabel("clause type (100 classes, sorted by frequency)")
-ax.set_ylabel("# provisions in train")
-ax.set_title("LEDGAR is long-tailed: a few common clauses, a long tail of rare ones", color=NAVY, fontsize=11.5)
-ax.annotate(f"most common: {counts[0]:,}", xy=(2, counts[0]), xytext=(14, counts[0] * 0.88), fontsize=10, color=NAVY)
-ax.annotate(f"rarest: {counts[-1]}", xy=(99, counts[-1]), xytext=(55, max(counts) * 0.22),
-            fontsize=10, color=GRAY, arrowprops=dict(arrowstyle="->", color=GRAY))
-no_spines(ax)
-fig.tight_layout(); fig.savefig("img/data_distribution.png", dpi=150); plt.close()
-print("data_distribution.png")
 
-# 3) accuracy
-rows = [("Base SmolLM3-3B", 39.3, GRAY), ("GPT-5.5", 76.7, BLUE),
-        ("Claude Sonnet 4.6", 77.0, BLUE), ("Fine-tuned SmolLM3-3B (ours)", 81.7, ORANGE)]
-rows = sorted(rows, key=lambda r: r[1])
-fig, ax = plt.subplots(figsize=(8, 3.8))
-ax.barh([r[0] for r in rows], [r[1] for r in rows], color=[r[2] for r in rows])
-for i, r in enumerate(rows):
-    ax.text(r[1] + 1, i, f"{r[1]:.1f}%", va="center", fontsize=11, color=NAVY)
-ax.axvline(70, ls=":", color="#999"); ax.axvline(88, ls=":", color="#999")
-ax.text(70, len(rows) - 0.35, "GPT-3.5 (pub.) 70", fontsize=8.5, color="#999", ha="center")
-ax.text(88, len(rows) - 0.35, "Legal-BERT 88", fontsize=8.5, color="#999", ha="center")
-ax.set_xlim(0, 100)
-ax.set_xlabel("LEDGAR accuracy (%), same 300-example test set")
-ax.set_title("A fine-tuned 3B vs the frontier (legal clause classification)", color=NAVY, fontsize=12)
-no_spines(ax)
-fig.tight_layout(); fig.savefig("img/accuracy.png", dpi=150); plt.close()
-print("accuracy.png")
+def write_data_distribution():
+    from datasets import load_dataset
 
-# 4) the settings experiment (prompt design -> 2x throughput)
-fig, ax = plt.subplots(figsize=(5.6, 3.8))
-bars = ax.bar(["with 100-label\nlist in prompt", "no label list\n(model learned them)"],
-              [0.89, 1.84], color=[GRAY, ORANGE], width=.6)
-for b, v in zip(bars, [0.89, 1.84]):
-    ax.text(b.get_x() + b.get_width() / 2, v + 0.03, f"{v}/s", ha="center", fontsize=12, color=NAVY)
-ax.set_ylabel("training throughput (samples/sec)")
-ax.set_title("One prompt-design choice ~doubled training speed", color=NAVY, fontsize=11.5)
-no_spines(ax)
-fig.tight_layout(); fig.savefig("img/throughput.png", dpi=150); plt.close()
-print("throughput.png")
-print("ALL CHARTS DONE")
+    dataset = load_dataset("coastalcph/lex_glue", "ledgar")
+    names = dataset["train"].features["label"].names
+    counts_by_label = Counter(dataset["train"]["label"])
+    counts = sorted((counts_by_label[i] for i in range(len(names))), reverse=True)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(range(len(counts)), counts, color=ORANGE, width=1.0)
+    ax.set_xlabel("clause type (100 classes, sorted by frequency)")
+    ax.set_ylabel("provisions in train")
+    ax.set_title("LEDGAR is long-tailed", color=NAVY, fontsize=12)
+    ax.annotate(
+        f"most common: {counts[0]:,}",
+        xy=(2, counts[0]),
+        xytext=(14, counts[0] * 0.88),
+        fontsize=10,
+        color=NAVY,
+    )
+    ax.annotate(
+        f"rarest: {counts[-1]}",
+        xy=(99, counts[-1]),
+        xytext=(55, max(counts) * 0.22),
+        fontsize=10,
+        color=GRAY,
+        arrowprops={"arrowstyle": "->", "color": GRAY},
+    )
+    no_spines(ax)
+    fig.tight_layout()
+    fig.savefig(OUT / "data_distribution.png", dpi=150)
+    plt.close(fig)
+    print("wrote assets/data_distribution.png")
+
+
+def ledgar_runs():
+    rows = []
+    for path in sorted(RUNS.glob("*.json")):
+        try:
+            row = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if row.get("dataset") == "ledgar" and "accuracy" in row and "name" in row:
+            rows.append(row)
+    return sorted(rows, key=lambda row: row["accuracy"])
+
+
+def write_accuracy():
+    rows = ledgar_runs()
+    if not rows:
+        print("skip accuracy.png: no LEDGAR run summaries found")
+        return
+
+    names = [row["name"] for row in rows]
+    values = [row["accuracy"] * 100 for row in rows]
+    colors = [ORANGE if "fine" in name.lower() or "ours" in name.lower() else BLUE for name in names]
+
+    fig, ax = plt.subplots(figsize=(8, max(3.8, 0.55 * len(rows) + 1.5)))
+    ax.barh(names, values, color=colors)
+    for index, value in enumerate(values):
+        ax.text(value + 0.8, index, f"{value:.1f}%", va="center", fontsize=11, color=NAVY)
+    ax.set_xlim(0, 100)
+    ax.set_xlabel("LEDGAR accuracy (%)")
+    ax.set_title("Measured runs on the same held-out split", color=NAVY, fontsize=12)
+    no_spines(ax)
+    fig.tight_layout()
+    fig.savefig(OUT / "accuracy.png", dpi=150)
+    plt.close(fig)
+    print("wrote assets/accuracy.png")
+
+
+def write_throughput():
+    artifact = RUNS / "training-throughput.json"
+    if not artifact.exists():
+        print("skip throughput.png: runs/training-throughput.json not found")
+        return
+    data = json.loads(artifact.read_text())
+    values = [data["with_label_list"], data["without_label_list"]]
+    labels = ["with label list", "without label list"]
+
+    fig, ax = plt.subplots(figsize=(5.6, 3.8))
+    bars = ax.bar(labels, values, color=[GRAY, ORANGE], width=0.6)
+    for bar, value in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, value + 0.03, f"{value:.2f}/s", ha="center")
+    ax.set_ylabel("training throughput (samples/sec)")
+    ax.set_title("Prompt design changes training speed", color=NAVY, fontsize=11.5)
+    no_spines(ax)
+    fig.tight_layout()
+    fig.savefig(OUT / "throughput.png", dpi=150)
+    plt.close(fig)
+    print("wrote assets/throughput.png")
+
+
+def main():
+    write_training_loss()
+    write_data_distribution()
+    write_accuracy()
+    write_throughput()
+
+
+if __name__ == "__main__":
+    main()

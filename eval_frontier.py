@@ -1,6 +1,6 @@
 """Score a current frontier model on the SAME test split, zero-shot.
 
-Anchors (today's frontier, not 2024) — verify exact ids on your account:
+Anchors (today's frontier, not 2024). Verify exact ids on your account:
   Anthropic  claude-opus-4-8   ($5 / $25 per 1M)
   Anthropic  claude-sonnet-4-6 ($3 / $15 per 1M)   <- mid-tier cost point
   Anthropic  claude-haiku-4-5  ($1 / $5 per 1M)    <- frontier-cheap tier
@@ -8,7 +8,7 @@ Anchors (today's frontier, not 2024) — verify exact ids on your account:
   Google     gemini-3-pro
 
 Thinking is disabled on the Claude side: this is fast classification, not reasoning.
-Writes runs/<name>.json so report.py can line everything up.
+Writes a run summary and per-example predictions so the score is auditable.
 """
 import argparse
 import json
@@ -73,14 +73,27 @@ def main():
     labels = label_names(args.dataset)
 
     n = correct = errors = 0
+    preds = []
     t0 = time.time()
     for ex in examples(args.dataset, "test", n=args.limit):
+        error = None
         try:
             gen = clf(ex["text"])
         except Exception as e:  # one bad call shouldn't kill the run
             gen, errors = "", errors + 1
+            error = str(e)[:240]
             print("err:", e)
-        if to_label(gen, labels) == ex["label"]:
+        pred = to_label(gen, labels)
+        is_correct = pred == ex["label"]
+        preds.append({
+            "gold": ex["label"],
+            "pred": pred,
+            "raw": gen.strip()[:240],
+            "correct": is_correct,
+            "error": error,
+            "text": ex["text"][:400],
+        })
+        if is_correct:
             correct += 1
         n += 1
     dt = time.time() - t0
@@ -98,6 +111,10 @@ def main():
     fn = "runs/" + res["name"].replace("/", "_").replace(":", "_") + ".json"
     with open(fn, "w") as f:
         json.dump(res, f, indent=2)
+    pred_fn = fn.removesuffix(".json") + "-predictions.jsonl"
+    with open(pred_fn, "w") as f:
+        for pred in preds:
+            f.write(json.dumps(pred) + "\n")
     print(json.dumps(res, indent=2))
 
 

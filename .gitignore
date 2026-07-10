@@ -17,5 +17,9 @@ adapters/
 checkpoints/
 *.log
 
+# local research, not part of the public reproduction
+benchmark_dashboard.html
+dossier_from_lab_PRIVATE/
+
 # os
 .DS_Store

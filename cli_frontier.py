@@ -44,6 +44,8 @@ TMP = tempfile.gettempdir()
 def run_claude(prompt, model):
     r = subprocess.run(["claude", "-p", "--model", model], input=prompt,
                        capture_output=True, text=True, cwd=TMP, timeout=180)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip() or f"claude exited {r.returncode}")
     return r.stdout.strip()
 
 
@@ -51,9 +53,11 @@ def run_codex(prompt, model):
     fd, out = tempfile.mkstemp(suffix=".txt")
     os.close(fd)
     try:
-        subprocess.run(["codex", "exec", "--skip-git-repo-check",
-                        "-c", 'model_reasoning_effort="low"', "-m", model, "-o", out, prompt],
-                       capture_output=True, text=True, cwd=TMP, timeout=240)
+        r = subprocess.run(["codex", "exec", "--skip-git-repo-check",
+                            "-c", 'model_reasoning_effort="low"', "-m", model, "-o", out, prompt],
+                           capture_output=True, text=True, cwd=TMP, timeout=240)
+        if r.returncode != 0:
+            raise RuntimeError(r.stderr.strip() or f"codex exited {r.returncode}")
         with open(out) as f:
             return f.read().strip()
     finally:
@@ -113,10 +117,14 @@ def main():
             f.write(json.dumps(p) + "\n")
 
     n = len(rows)
+    wall_seconds = time.time() - t0
     res = {"name": name, "dataset": a.dataset, "kind": "frontier", "n": n,
            "errors": err, "accuracy": round(correct / n, 4),
-           "sec_per_req": round((time.time() - t0) / n, 4)}
-    json.dump(res, open("runs/" + name.replace("/", "_").replace(":", "_") + ".json", "w"), indent=2)
+           "workers": a.workers, "wall_seconds": round(wall_seconds, 2),
+           "throughput_per_s": round(n / wall_seconds, 4)}
+    result_path = "runs/" + name.replace("/", "_").replace(":", "_") + ".json"
+    with open(result_path, "w") as f:
+        json.dump(res, f, indent=2)
     print(json.dumps(res, indent=2))
 
 

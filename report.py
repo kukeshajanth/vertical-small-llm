@@ -1,42 +1,86 @@
-"""Line up every runs/*.json into one table + a bar chart for the article."""
-import glob
+"""Build an auditable table and accuracy chart from runs/*.json."""
 import json
+from collections import defaultdict
+from pathlib import Path
+
+
+RUNS_DIR = Path("runs")
+
+
+def load_runs():
+    rows = []
+    for path in sorted(RUNS_DIR.glob("*.json")):
+        try:
+            row = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"skipping {path}: {exc}")
+            continue
+        if not {"name", "dataset", "accuracy"}.issubset(row):
+            print(f"skipping {path}: not a run summary")
+            continue
+        rows.append(row)
+    return rows
+
+
+def print_table(dataset, rows):
+    print(f"\n{dataset.upper()}  n varies by run; inspect JSON before comparing")
+    print(f"{'model':46} {'n':>6} {'acc':>7} {'errors':>7} {'sec/req':>9} {'tok/s':>8}")
+    print("-" * 91)
+    for row in rows:
+        tps = row.get("tok_per_s", "-")
+        sec = row.get("sec_per_req", "-")
+        print(
+            f"{row['name']:46} {row.get('n', '-'):>6} {row['accuracy'] * 100:6.1f}% "
+            f"{row.get('errors', 0):>7} {sec:>9} {tps:>8}"
+        )
+
+
+def write_chart(dataset, rows):
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        print("chart skipped:", exc)
+        return
+
+    names = [row["name"] for row in rows]
+    accuracy = [row["accuracy"] * 100 for row in rows]
+    fig, ax = plt.subplots(figsize=(8, 0.5 * len(rows) + 1.5))
+    bars = ax.barh(names[::-1], accuracy[::-1])
+    for bar, value in zip(bars, accuracy[::-1]):
+        ax.text(
+            value + 0.5,
+            bar.get_y() + bar.get_height() / 2,
+            f"{value:.1f}%",
+            va="center",
+            fontsize=9,
+        )
+    ax.set_xlabel(f"{dataset.upper()} accuracy (%)")
+    ax.set_xlim(0, 100)
+    ax.set_title(f"Model accuracy on {dataset.upper()}")
+    fig.tight_layout()
+    output = RUNS_DIR / f"{dataset}-accuracy.png"
+    fig.savefig(output, dpi=150)
+    plt.close(fig)
+    print(f"wrote {output}")
 
 
 def main():
-    rows = [json.load(open(f)) for f in glob.glob("runs/*.json")]
+    rows = load_runs()
     if not rows:
-        print("no runs yet — run eval_local.py / eval_frontier.py first")
+        print("no runs yet; run eval_local.py or a frontier evaluator first")
         return
-    rows.sort(key=lambda r: -r.get("accuracy", 0))
 
-    print(f"\n{'model':46} {'acc':>7} {'sec/req':>9} {'tok/s':>8}")
-    print("-" * 74)
-    for r in rows:
-        tps = r.get("tok_per_s", "-")
-        print(f"{r['name']:46} {r['accuracy'] * 100:6.1f}% "
-              f"{r.get('sec_per_req', '-'):>9} {tps:>8}")
+    by_dataset = defaultdict(list)
+    for row in rows:
+        by_dataset[row["dataset"]].append(row)
 
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        names = [r["name"] for r in rows]
-        acc = [r["accuracy"] * 100 for r in rows]
-        plt.figure(figsize=(8, 0.5 * len(rows) + 1.5))
-        bars = plt.barh(names[::-1], acc[::-1])
-        for b, a in zip(bars, acc[::-1]):
-            plt.text(a + 0.5, b.get_y() + b.get_height() / 2,
-                     f"{a:.1f}%", va="center", fontsize=9)
-        plt.xlabel("Banking77 accuracy (%)")
-        plt.xlim(0, 100)
-        plt.title("Small fine-tuned 3B vs current frontier models")
-        plt.tight_layout()
-        plt.savefig("runs/accuracy.png", dpi=150)
-        print("\nwrote runs/accuracy.png")
-    except Exception as e:
-        print("chart skipped:", e)
+    for dataset in sorted(by_dataset):
+        dataset_rows = sorted(by_dataset[dataset], key=lambda row: -row["accuracy"])
+        print_table(dataset, dataset_rows)
+        write_chart(dataset, dataset_rows)
 
 
 if __name__ == "__main__":

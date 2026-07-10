@@ -1,7 +1,7 @@
 """Two verticals, one code path. Each is a clean text -> single-label task.
 
-HERO   = ledgar    (legal contract-clause classification, 100 classes) — the marquee
-SECOND = banking77 (banking-support intent classification, 77 classes) — the "it travels" proof
+HERO   = ledgar    (legal contract-clause classification, 100 classes), the marquee
+SECOND = banking77 (banking-support intent classification, 77 classes), the "it travels" proof
 
 Same loader, same prompt builder, same metric (top-1 accuracy). Swap with --dataset.
 """
