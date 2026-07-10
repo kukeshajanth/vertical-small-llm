@@ -5,7 +5,6 @@ datasets
 peft>=0.13
 trl>=0.12
 accelerate
-bitsandbytes        # 4-bit QLoRA. On DGX Spark (ARM64 + Blackwell) build from source if the wheel is missing; or use --no-4bit to skip it entirely.
 
 # Frontier baselines
 anthropic>=0.40
